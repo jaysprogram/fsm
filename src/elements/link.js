@@ -7,7 +7,23 @@ function Link(a, b) {
 	// make anchor point relative to the locations of nodeA and nodeB
 	this.parallelPart = 0.5; // percentage from nodeA to nodeB
 	this.perpendicularPart = 0; // pixels from line between nodeA and nodeB
+	
+	// check if there's already a link going the opposite direction
+	// if so, curve this link to make both arrows distinct
+	if(this.hasReverseLink()) {
+		this.perpendicularPart = 35; // curve the link by 35 pixels
+	}
 }
+
+Link.prototype.hasReverseLink = function() {
+	// check if there's already a link from nodeB to nodeA
+	for(var i = 0; i < links.length; i++) {
+		if(links[i].nodeA == this.nodeB && links[i].nodeB == this.nodeA) {
+			return true;
+		}
+	}
+	return false;
+};
 
 Link.prototype.getAnchorPoint = function() {
 	var dx = this.nodeB.x - this.nodeA.x;

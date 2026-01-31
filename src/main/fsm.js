@@ -98,6 +98,239 @@ var cursorVisible = true;
 var snapToPadding = 6; // pixels
 var hitTargetPadding = 6; // pixels
 var selectedObject = null; // either a Link or a Node
+
+// Undo/Redo history
+var undoStack = [];
+var redoStack = [];
+var maxHistorySize = 50;
+
+function saveToHistory() {
+	if(!JSON) return;
+	
+	var state = {
+		'nodes': [],
+		'links': []
+	};
+	
+	for(var i = 0; i < nodes.length; i++) {
+		var node = nodes[i];
+		state.nodes.push({
+			'x': node.x,
+			'y': node.y,
+			'text': node.text,
+			'isAcceptState': node.isAcceptState
+		});
+	}
+	
+	for(var i = 0; i < links.length; i++) {
+		var link = links[i];
+		var backupLink = null;
+		if(link instanceof SelfLink) {
+			backupLink = {
+				'type': 'SelfLink',
+				'node': nodes.indexOf(link.node),
+				'text': link.text,
+				'anchorAngle': link.anchorAngle
+			};
+		} else if(link instanceof StartLink) {
+			backupLink = {
+				'type': 'StartLink',
+				'node': nodes.indexOf(link.node),
+				'text': link.text,
+				'deltaX': link.deltaX,
+				'deltaY': link.deltaY
+			};
+		} else if(link instanceof Link) {
+			backupLink = {
+				'type': 'Link',
+				'nodeA': nodes.indexOf(link.nodeA),
+				'nodeB': nodes.indexOf(link.nodeB),
+				'text': link.text,
+				'lineAngleAdjust': link.lineAngleAdjust,
+				'parallelPart': link.parallelPart,
+				'perpendicularPart': link.perpendicularPart
+			};
+		}
+		if(backupLink != null) {
+			state.links.push(backupLink);
+		}
+	}
+	
+	undoStack.push(JSON.stringify(state));
+	if(undoStack.length > maxHistorySize) {
+		undoStack.shift();
+	}
+	// Clear redo stack when new action is performed
+	redoStack = [];
+}
+
+function restoreFromState(stateStr) {
+	if(!JSON) return;
+	
+	try {
+		var state = JSON.parse(stateStr);
+		nodes = [];
+		links = [];
+		selectedObject = null;
+		
+		for(var i = 0; i < state.nodes.length; i++) {
+			var backupNode = state.nodes[i];
+			var node = new Node(backupNode.x, backupNode.y);
+			node.isAcceptState = backupNode.isAcceptState;
+			node.text = backupNode.text;
+			nodes.push(node);
+		}
+		
+		for(var i = 0; i < state.links.length; i++) {
+			var backupLink = state.links[i];
+			var link = null;
+			if(backupLink.type == 'SelfLink') {
+				link = new SelfLink(nodes[backupLink.node]);
+				link.anchorAngle = backupLink.anchorAngle;
+				link.text = backupLink.text;
+			} else if(backupLink.type == 'StartLink') {
+				link = new StartLink(nodes[backupLink.node]);
+				link.deltaX = backupLink.deltaX;
+				link.deltaY = backupLink.deltaY;
+				link.text = backupLink.text;
+			} else if(backupLink.type == 'Link') {
+				link = new Link(nodes[backupLink.nodeA], nodes[backupLink.nodeB]);
+				link.parallelPart = backupLink.parallelPart;
+				link.perpendicularPart = backupLink.perpendicularPart;
+				link.text = backupLink.text;
+				link.lineAngleAdjust = backupLink.lineAngleAdjust;
+			}
+			if(link != null) {
+				links.push(link);
+			}
+		}
+		draw();
+	} catch(e) {
+		// Ignore errors
+	}
+}
+
+function undo() {
+	if(undoStack.length > 0) {
+		// Save current state to redo stack
+		var currentState = {
+			'nodes': [],
+			'links': []
+		};
+		for(var i = 0; i < nodes.length; i++) {
+			var node = nodes[i];
+			currentState.nodes.push({
+				'x': node.x,
+				'y': node.y,
+				'text': node.text,
+				'isAcceptState': node.isAcceptState
+			});
+		}
+		for(var i = 0; i < links.length; i++) {
+			var link = links[i];
+			var backupLink = null;
+			if(link instanceof SelfLink) {
+				backupLink = {
+					'type': 'SelfLink',
+					'node': nodes.indexOf(link.node),
+					'text': link.text,
+					'anchorAngle': link.anchorAngle
+				};
+			} else if(link instanceof StartLink) {
+				backupLink = {
+					'type': 'StartLink',
+					'node': nodes.indexOf(link.node),
+					'text': link.text,
+					'deltaX': link.deltaX,
+					'deltaY': link.deltaY
+				};
+			} else if(link instanceof Link) {
+				backupLink = {
+					'type': 'Link',
+					'nodeA': nodes.indexOf(link.nodeA),
+					'nodeB': nodes.indexOf(link.nodeB),
+					'text': link.text,
+					'lineAngleAdjust': link.lineAngleAdjust,
+					'parallelPart': link.parallelPart,
+					'perpendicularPart': link.perpendicularPart
+				};
+			}
+			if(backupLink != null) {
+				currentState.links.push(backupLink);
+			}
+		}
+		redoStack.push(JSON.stringify(currentState));
+		
+		// Restore previous state
+		var previousState = undoStack.pop();
+		restoreFromState(previousState);
+	}
+}
+
+function redo() {
+	if(redoStack.length > 0) {
+		// Save current state to undo stack
+		var currentState = {
+			'nodes': [],
+			'links': []
+		};
+		for(var i = 0; i < nodes.length; i++) {
+			var node = nodes[i];
+			currentState.nodes.push({
+				'x': node.x,
+				'y': node.y,
+				'text': node.text,
+				'isAcceptState': node.isAcceptState
+			});
+		}
+		for(var i = 0; i < links.length; i++) {
+			var link = links[i];
+			var backupLink = null;
+			if(link instanceof SelfLink) {
+				backupLink = {
+					'type': 'SelfLink',
+					'node': nodes.indexOf(link.node),
+					'text': link.text,
+					'anchorAngle': link.anchorAngle
+				};
+			} else if(link instanceof StartLink) {
+				backupLink = {
+					'type': 'StartLink',
+					'node': nodes.indexOf(link.node),
+					'text': link.text,
+					'deltaX': link.deltaX,
+					'deltaY': link.deltaY
+				};
+			} else if(link instanceof Link) {
+				backupLink = {
+					'type': 'Link',
+					'nodeA': nodes.indexOf(link.nodeA),
+					'nodeB': nodes.indexOf(link.nodeB),
+					'text': link.text,
+					'lineAngleAdjust': link.lineAngleAdjust,
+					'parallelPart': link.parallelPart,
+					'perpendicularPart': link.perpendicularPart
+				};
+			}
+			if(backupLink != null) {
+				currentState.links.push(backupLink);
+			}
+		}
+		undoStack.push(JSON.stringify(currentState));
+		
+		// Restore next state
+		var nextState = redoStack.pop();
+		restoreFromState(nextState);
+	}
+}
+
+function clearAll() {
+	saveToHistory();
+	nodes = [];
+	links = [];
+	selectedObject = null;
+	draw();
+}
 var currentLink = null; // a Link
 var movingObject = false;
 var originalClick;
@@ -202,11 +435,13 @@ window.onload = function() {
 		selectedObject = selectObject(mouse.x, mouse.y);
 
 		if(selectedObject == null) {
+			saveToHistory();
 			selectedObject = new Node(mouse.x, mouse.y);
 			nodes.push(selectedObject);
 			resetCaret();
 			draw();
 		} else if(selectedObject instanceof Node) {
+			saveToHistory();
 			selectedObject.isAcceptState = !selectedObject.isAcceptState;
 			draw();
 		}
@@ -253,6 +488,7 @@ window.onload = function() {
 
 		if(currentLink != null) {
 			if(!(currentLink instanceof TemporaryLink)) {
+				saveToHistory();
 				selectedObject = currentLink;
 				links.push(currentLink);
 				resetCaret();
@@ -273,6 +509,12 @@ document.onkeydown = function(e) {
 	} else if(!canvasHasFocus()) {
 		// don't read keystrokes when other things have focus
 		return true;
+	} else if((e.ctrlKey || e.metaKey) && key == 90) { // Ctrl+Z or Cmd+Z
+		undo();
+		return false;
+	} else if((e.ctrlKey || e.metaKey) && key == 89) { // Ctrl+Y or Cmd+Y
+		redo();
+		return false;
 	} else if(key == 8) { // backspace key
 		if(selectedObject != null && 'text' in selectedObject) {
 			selectedObject.text = selectedObject.text.substr(0, selectedObject.text.length - 1);
@@ -284,6 +526,7 @@ document.onkeydown = function(e) {
 		return false;
 	} else if(key == 46) { // delete key
 		if(selectedObject != null) {
+			saveToHistory();
 			for(var i = 0; i < nodes.length; i++) {
 				if(nodes[i] == selectedObject) {
 					nodes.splice(i--, 1);
@@ -373,7 +616,14 @@ function saveAsPNG() {
 	drawUsing(canvas.getContext('2d'));
 	selectedObject = oldSelectedObject;
 	var pngData = canvas.toDataURL('image/png');
-	document.location.href = pngData;
+	
+	// Create a download link instead of navigating to data URL (Chrome security restriction)
+	var link = document.createElement('a');
+	link.download = 'fsm.png';
+	link.href = pngData;
+	document.body.appendChild(link);
+	link.click();
+	document.body.removeChild(link);
 }
 
 function saveAsSVG() {

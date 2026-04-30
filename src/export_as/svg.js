@@ -81,7 +81,14 @@ function ExportAsSVG() {
 		x += this._transX;
 		y += this._transY;
 		if(text.replace(' ', '').length > 0) {
-			this._svgData += '\t<text x="' + fixed(x, 3) + '" y="' + fixed(y, 3) + '" font-family="Times New Roman" font-size="20">' + textToXML(text) + '</text>\n';
+			var fontSize = 20;
+			var fontFamily = 'Times New Roman';
+			var fontMatch = this.font.match(/([0-9]+(?:\.[0-9]+)?)px\s+(.+)/);
+			if(fontMatch) {
+				fontSize = parseFloat(fontMatch[1]);
+				fontFamily = fontMatch[2];
+			}
+			this._svgData += '\t<text x="' + fixed(x, 3) + '" y="' + fixed(y, 3) + '" font-family="' + textToXML(fontFamily) + '" font-size="' + fixed(fontSize, 3) + '">' + textToXML(text) + '</text>\n';
 		}
 	};
 	this.translate = function(x, y) {

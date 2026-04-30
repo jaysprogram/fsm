@@ -13,7 +13,91 @@ function convertLatexShortcuts(text) {
 		text = text.replace(new RegExp('_' + i, 'g'), String.fromCharCode(8320 + i));
 	}
 
+	// common symbols
+	text = text.replace(/\\to/g, '\u2192');
+	text = text.replace(/\\cup/g, '\u222A');
+	text = text.replace(/\\sqcup/g, '\u2294');
+	text = text.replace(/\/sqcup/g, '\u2294');
+
 	return text;
+}
+
+function convertGroupedSubscriptsForLatex(text) {
+	return text
+		.replace(/_\(([^()]+)\)/g, '_{$1}')
+		.replace(/\\to(?=[A-Za-z])/g, '\\to ');
+}
+
+function parseSubscriptSegments(text) {
+	var segments = [];
+	var i = 0;
+
+	while(i < text.length) {
+		if(text[i] != '_') {
+			var nextUnderscore = text.indexOf('_', i);
+			if(nextUnderscore == -1) {
+				nextUnderscore = text.length;
+			}
+			segments.push({ 'text': text.substring(i, nextUnderscore), 'isSubscript': false });
+			i = nextUnderscore;
+			continue;
+		}
+
+		if(i + 1 >= text.length) {
+			segments.push({ 'text': '_', 'isSubscript': false });
+			i++;
+			continue;
+		}
+
+		if(text[i + 1] == '(') {
+			var closingParen = text.indexOf(')', i + 2);
+			if(closingParen != -1 && closingParen > i + 2) {
+				segments.push({ 'text': text.substring(i + 2, closingParen), 'isSubscript': true });
+				i = closingParen + 1;
+				continue;
+			}
+
+			segments.push({ 'text': '_', 'isSubscript': false });
+			i++;
+			continue;
+		}
+
+		segments.push({ 'text': text[i + 1], 'isSubscript': true });
+		i += 2;
+	}
+
+	return segments;
+}
+
+function fontWithScaledSize(font, scale) {
+	return font.replace(/([0-9]+(?:\.[0-9]+)?)px/, function(match, size) {
+		return (parseFloat(size) * scale) + 'px';
+	});
+}
+
+function measureTextSegments(c, segments, normalFont, subscriptFont) {
+	var width = 0;
+	for(var i = 0; i < segments.length; i++) {
+		var segment = segments[i];
+		if(segment.text.length == 0) continue;
+		c.font = segment.isSubscript ? subscriptFont : normalFont;
+		width += c.measureText(segment.text).width;
+	}
+	c.font = normalFont;
+	return width;
+}
+
+function drawTextSegments(c, segments, x, y, normalFont, subscriptFont, subscriptOffset) {
+	var drawX = x;
+	for(var i = 0; i < segments.length; i++) {
+		var segment = segments[i];
+		if(segment.text.length == 0) continue;
+		var yOffset = segment.isSubscript ? subscriptOffset : 0;
+		c.font = segment.isSubscript ? subscriptFont : normalFont;
+		c.fillText(segment.text, drawX, y + yOffset);
+		drawX += c.measureText(segment.text).width;
+	}
+	c.font = normalFont;
 }
 
 function textToXML(text) {
@@ -45,9 +129,14 @@ function canvasHasFocus() {
 }
 
 function drawText(c, originalText, x, y, angleOrNull, isSelected) {
-	text = convertLatexShortcuts(originalText);
+	var text = convertLatexShortcuts(originalText);
+	var textForExport = convertGroupedSubscriptsForLatex(originalText);
 	c.font = '20px "Times New Roman", serif';
-	var width = c.measureText(text).width;
+	var normalFont = c.font;
+	var subscriptFont = fontWithScaledSize(normalFont, 0.7);
+	var subscriptOffset = 8;
+	var segments = parseSubscriptSegments(text);
+	var width = measureTextSegments(c, segments, normalFont, subscriptFont);
 
 	// center the text
 	x -= width / 2;
@@ -65,11 +154,11 @@ function drawText(c, originalText, x, y, angleOrNull, isSelected) {
 
 	// draw text and caret (round the coordinates so the caret falls on a pixel)
 	if('advancedFillText' in c) {
-		c.advancedFillText(text, originalText, x + width / 2, y, angleOrNull);
+		c.advancedFillText(text, textForExport, x + width / 2, y, angleOrNull);
 	} else {
 		x = Math.round(x);
 		y = Math.round(y);
-		c.fillText(text, x, y + 6);
+		drawTextSegments(c, segments, x, y + 6, normalFont, subscriptFont, subscriptOffset);
 		if(isSelected && caretVisible && canvasHasFocus() && document.hasFocus()) {
 			x += width;
 			c.beginPath();
@@ -98,6 +187,7 @@ var cursorVisible = true;
 var snapToPadding = 6; // pixels
 var hitTargetPadding = 6; // pixels
 var selectedObject = null; // either a Link or a Node
+var alignmentGuides = { 'vertical': null, 'horizontal': null };
 
 // Undo/Redo history
 var undoStack = [];
@@ -335,7 +425,7 @@ var currentLink = null; // a Link
 var movingObject = false;
 var originalClick;
 
-function drawUsing(c) {
+function drawUsing(c, shouldDrawGuides) {
 	c.clearRect(0, 0, canvas.width, canvas.height);
 	c.save();
 	c.translate(0.5, 0.5);
@@ -355,12 +445,15 @@ function drawUsing(c) {
 		c.fillStyle = c.strokeStyle = 'black';
 		currentLink.draw(c);
 	}
+	if(shouldDrawGuides) {
+		drawAlignmentGuides(c);
+	}
 
 	c.restore();
 }
 
 function draw() {
-	drawUsing(canvas.getContext('2d'));
+	drawUsing(canvas.getContext('2d'), true);
 	saveBackup();
 }
 
@@ -379,17 +472,106 @@ function selectObject(x, y) {
 }
 
 function snapNode(node) {
+	var guide = { 'vertical': null, 'horizontal': null };
+	var closestXDistance = snapToPadding + 1;
+	var closestYDistance = snapToPadding + 1;
+
 	for(var i = 0; i < nodes.length; i++) {
 		if(nodes[i] == node) continue;
 
-		if(Math.abs(node.x - nodes[i].x) < snapToPadding) {
-			node.x = nodes[i].x;
+		var xDistance = Math.abs(node.x - nodes[i].x);
+		if(xDistance < snapToPadding && xDistance < closestXDistance) {
+			closestXDistance = xDistance;
+			guide.vertical = nodes[i].x;
 		}
 
-		if(Math.abs(node.y - nodes[i].y) < snapToPadding) {
-			node.y = nodes[i].y;
+		var yDistance = Math.abs(node.y - nodes[i].y);
+		if(yDistance < snapToPadding && yDistance < closestYDistance) {
+			closestYDistance = yDistance;
+			guide.horizontal = nodes[i].y;
 		}
 	}
+
+	var centerX = canvas.width / 2;
+	var centerY = canvas.height / 2;
+	var centerXDistance = Math.abs(node.x - centerX);
+	var centerYDistance = Math.abs(node.y - centerY);
+	if(centerXDistance < snapToPadding && centerXDistance < closestXDistance) {
+		closestXDistance = centerXDistance;
+		guide.vertical = centerX;
+	}
+	if(centerYDistance < snapToPadding && centerYDistance < closestYDistance) {
+		closestYDistance = centerYDistance;
+		guide.horizontal = centerY;
+	}
+
+	if(guide.vertical != null) {
+		node.x = guide.vertical;
+	}
+	if(guide.horizontal != null) {
+		node.y = guide.horizontal;
+	}
+
+	return guide;
+}
+
+function clearAlignmentGuides() {
+	alignmentGuides.vertical = null;
+	alignmentGuides.horizontal = null;
+}
+
+function drawAlignmentGuides(c) {
+	if(alignmentGuides.vertical == null && alignmentGuides.horizontal == null) {
+		return;
+	}
+
+	var minX = canvas.width;
+	var maxX = 0;
+	var minY = canvas.height;
+	var maxY = 0;
+	for(var i = 0; i < nodes.length; i++) {
+		minX = Math.min(minX, nodes[i].x);
+		maxX = Math.max(maxX, nodes[i].x);
+		minY = Math.min(minY, nodes[i].y);
+		maxY = Math.max(maxY, nodes[i].y);
+	}
+	if(nodes.length == 0) {
+		minX = 0;
+		maxX = canvas.width;
+		minY = 0;
+		maxY = canvas.height;
+	}
+
+	var padding = nodeRadius * 1.5;
+	minX = Math.max(0, minX - padding);
+	maxX = Math.min(canvas.width, maxX + padding);
+	minY = Math.max(0, minY - padding);
+	maxY = Math.min(canvas.height, maxY + padding);
+
+	c.save();
+	c.lineWidth = 1;
+	c.strokeStyle = 'rgba(0, 120, 255, 0.55)';
+	if('setLineDash' in c) {
+		c.setLineDash([6, 4]);
+	}
+
+	if(alignmentGuides.vertical != null) {
+		c.beginPath();
+		c.moveTo(alignmentGuides.vertical, minY);
+		c.lineTo(alignmentGuides.vertical, maxY);
+		c.stroke();
+	}
+	if(alignmentGuides.horizontal != null) {
+		c.beginPath();
+		c.moveTo(minX, alignmentGuides.horizontal);
+		c.lineTo(maxX, alignmentGuides.horizontal);
+		c.stroke();
+	}
+
+	if('setLineDash' in c) {
+		c.setLineDash([]);
+	}
+	c.restore();
 }
 
 window.onload = function() {
@@ -400,6 +582,7 @@ window.onload = function() {
 	canvas.onmousedown = function(e) {
 		var mouse = crossBrowserRelativeMousePos(e);
 		selectedObject = selectObject(mouse.x, mouse.y);
+		clearAlignmentGuides();
 		movingObject = false;
 		originalClick = mouse;
 
@@ -477,13 +660,16 @@ window.onload = function() {
 		if(movingObject) {
 			selectedObject.setAnchorPoint(mouse.x, mouse.y);
 			if(selectedObject instanceof Node) {
-				snapNode(selectedObject);
+				alignmentGuides = snapNode(selectedObject);
+			} else {
+				clearAlignmentGuides();
 			}
 			draw();
 		}
 	};
 
 	canvas.onmouseup = function(e) {
+		var wasMoving = movingObject;
 		movingObject = false;
 
 		if(currentLink != null) {
@@ -494,6 +680,9 @@ window.onload = function() {
 				resetCaret();
 			}
 			currentLink = null;
+			draw();
+		} else if(wasMoving) {
+			clearAlignmentGuides();
 			draw();
 		}
 	};
@@ -613,7 +802,7 @@ function output(text) {
 function saveAsPNG() {
 	var oldSelectedObject = selectedObject;
 	selectedObject = null;
-	drawUsing(canvas.getContext('2d'));
+	drawUsing(canvas.getContext('2d'), false);
 	selectedObject = oldSelectedObject;
 	var pngData = canvas.toDataURL('image/png');
 	
@@ -630,7 +819,7 @@ function saveAsSVG() {
 	var exporter = new ExportAsSVG();
 	var oldSelectedObject = selectedObject;
 	selectedObject = null;
-	drawUsing(exporter);
+	drawUsing(exporter, false);
 	selectedObject = oldSelectedObject;
 	var svgData = exporter.toSVG();
 	output(svgData);
@@ -642,7 +831,7 @@ function saveAsLaTeX() {
 	var exporter = new ExportAsLaTeX();
 	var oldSelectedObject = selectedObject;
 	selectedObject = null;
-	drawUsing(exporter);
+	drawUsing(exporter, false);
 	selectedObject = oldSelectedObject;
 	var texData = exporter.toLaTeX();
 	output(texData);

@@ -17,8 +17,8 @@ h1 {
 
 canvas {
 	display: block;
-	width: 100%;
-	max-width: 1800px;
+	width: 800px;
+	height: 600px;
 	background: white;
 	border-radius: 20px;
 	-moz-border-radius: 20px;
@@ -100,7 +100,7 @@ if (typeof btoa == 'undefined') {
 	</script>
 </head><body>
 	<h1>Finite State Machine Designer</h1>
-	<canvas id="canvas" width="1800" height="1000">
+	<canvas id="canvas" width="800" height="600">
 		<span class="error">Your browser does not support<br>the HTML5 &lt;canvas&gt; element</span>
 	</canvas>
 	<div>
@@ -120,7 +120,7 @@ if (typeof btoa == 'undefined') {
 			<li><b>Redo:</b> press Ctrl+Y (or Cmd+Y on Mac)</li>
 		</ul><ul>
 			<li><b>Make accept state:</b> double-click on an existing state</li>
-			<li><b>Type numeric subscript:</b> put an underscore before the number (like "S_0")</li>
+			<li><b>Type subscript:</b> use "_x" for one character (like "S_0") or "_(text)" for words (like "q_(accept)")</li>
 			<li><b>Type greek letter:</b> put a backslash before it (like "\beta")</li>
 		</ul>
 		<p><b>Note:</b> Bidirectional links between two states will automatically curve to remain distinct and visible.</p>
